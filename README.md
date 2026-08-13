@@ -56,9 +56,6 @@ The default checkpoint path is `pix2pix_gen_180.pth`. The command writes the res
 - Evaluation: configure the dataset and checkpoint, then run `uv run python test.py`.
 - ONNX export: `uv sync --group export`, configure `config.yaml`, then run `uv run python torch2onnx.py`.
 
-## Model files
-
-The original pretrained model files are hosted on [Hugging Face](https://huggingface.co/yuulind/pix2pix-sar2rgb). Checkpoints, datasets, virtual environments, and generated files are ignored by Git to keep clones lightweight and prevent accidental publication of local artifacts.
 
 ## Repository structure
 
