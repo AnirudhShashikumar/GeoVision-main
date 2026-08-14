@@ -1,0 +1,41 @@
+import type { Health, Pix2PixResult, SARFusionResult } from "@/types/api";
+
+const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8010").replace(/\/$/, "");
+
+async function request<T>(path: string, form: FormData): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, { method: "POST", body: form });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.detail ?? "Inference request failed.");
+  }
+  return response.json() as Promise<T>;
+}
+
+export const getHealth = async () => {
+  const response = await fetch(`${API_URL}/health`, { cache: "no-store" });
+  if (!response.ok) throw new Error("Backend is unavailable.");
+  return response.json() as Promise<Health>;
+};
+
+export function runPix2Pix(file: File, groundTruth?: File) {
+  const form = new FormData(); form.append("file", file);
+  if (groundTruth) form.append("ground_truth", groundTruth);
+  return request<Pix2PixResult>("/api/pix2pix/infer", form);
+}
+
+export function runSARFusionFormer(input: {
+  combined?: File; vv?: File; vh?: File; groundTruth?: File; applyColorCorrection: boolean;
+}) {
+  const form = new FormData();
+  if (input.combined) form.append("combined_file", input.combined);
+  if (input.vv) form.append("vv_file", input.vv);
+  if (input.vh) form.append("vh_file", input.vh);
+  if (input.groundTruth) form.append("ground_truth", input.groundTruth);
+  form.append("apply_color_correction", String(input.applyColorCorrection));
+  return request<SARFusionResult>("/api/sarfusionformer/infer", form);
+}
+
+export function runComparison(pix2pix: File, sarfusionformer: File, groundTruth: File) {
+  const form = new FormData(); form.append("pix2pix_output", pix2pix); form.append("sarfusionformer_output", sarfusionformer); form.append("ground_truth", groundTruth);
+  return request<{ pix2pix: { psnr: number; ssim: number; rgb_l1: number }; sarfusionformer: { psnr: number; ssim: number; rgb_l1: number } }>("/api/compare", form);
+}
