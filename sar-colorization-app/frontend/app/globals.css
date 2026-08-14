@@ -7,6 +7,13 @@
 body { min-height: 100vh; background-color: #09090B; color: #f4f4f5; -webkit-font-smoothing: antialiased; background-image: radial-gradient(circle at 75% -10%, rgba(14,165,233,.12), transparent 30rem), linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px); background-size: auto, 48px 48px, 48px 48px; transition: background-color .2s ease, color .2s ease; }
 button, input { font: inherit; }
 
+@keyframes status-ready-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(57, 255, 116, .7); opacity: .72; transform: scale(.88); }
+  50% { box-shadow: 0 0 13px rgba(57, 255, 116, 1); opacity: 1; transform: scale(1); }
+}
+
+.status-ready-dot { animation: status-ready-pulse 3.6s ease-in-out infinite; }
+
 @layer components {
   .glass { @apply border border-white/[.08] bg-white/[.025] backdrop-blur-xl; }
   .panel { @apply rounded-2xl border border-white/[.08] bg-card/90 shadow-glow; }

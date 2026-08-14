@@ -41,6 +41,8 @@ The interface connects to `http://127.0.0.1:8010` by default.
 - `SARFUSIONFORMER_CHECKPOINT`: path to `sarfusionformer_256_decoder_best.pt`.
 - `COLOR_CORRECTOR_CHECKPOINT`: path to `color_corrector_256_best.pt`.
 - `SAR_COLORIZATION_API_URL`: API URL used by Streamlit.
+- `VISION_PROVIDER`, `VISION_API_KEY`, `VISION_MODEL`: optional, server-side AI Image Analysis. In deployed environments, set these as server secrets. On local macOS installs, configure the key through Settings → AI Providers; it is saved to Keychain and never added to Git.
+- `CORS_ORIGINS`: comma-separated trusted frontend origins; defaults to the local GeoVision frontend.
 
 ## API routes
 
@@ -49,6 +51,9 @@ The interface connects to `http://127.0.0.1:8010` by default.
 - `POST /api/pix2pix/infer`: Pix2Pix JSON inference response.
 - `POST /api/sarfusionformer/infer`: independent VV/VH SARFusionFormer inference response.
 - `POST /api/compare`: metrics for two already-generated outputs and one common ground truth.
+- `POST /api/analysis/image`: optional qualitative analysis of a rendered image; it never changes inference or metrics.
+- `GET|POST|DELETE /api/settings/provider`: retrieve non-sensitive provider status, save a local secure configuration, or remove it.
+- `POST /api/settings/test`: lightweight server-side provider connection test.
 - `GET /health`: independent availability for all three loaded model components.
 
 ## Input requirements

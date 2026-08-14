@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import logging
 import os
 import sys
@@ -17,6 +18,7 @@ import torch.nn.functional as F
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
 from PIL import Image, UnidentifiedImageError
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 
@@ -25,6 +27,8 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from sarfusionformer import SARFusionFormer, lab_to_rgb
 from src.pix2pix import Pix2Pix
+from provider_settings import ProviderSettingsError, ProviderSettingsStore
+from vision_analysis import ImageAnalysisService, VisionAnalysisError, VisionSettings
 
 logging.basicConfig(level=logging.INFO)
 LOGGER = logging.getLogger("sar-colorization")
@@ -48,11 +52,14 @@ COLOR_CORRECTOR_CHECKPOINT = Path(
 )
 
 app = FastAPI(title="SAR-to-Optical Colorization API", version="2.0.0")
+CORS_ORIGINS = [origin.strip() for origin in os.getenv(
+    "CORS_ORIGINS", "http://127.0.0.1:8520,http://localhost:8520"
+).split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -135,6 +142,26 @@ SARFUSIONFORMER_MODEL, SARFUSIONFORMER_ERROR = try_load(
 COLOR_CORRECTOR, COLOR_CORRECTOR_ERROR = try_load(
     "Color corrector", load_color_corrector
 )
+VISION_ANALYSIS = ImageAnalysisService()
+PROVIDER_SETTINGS = ProviderSettingsStore()
+
+
+def sync_vision_settings() -> None:
+    """Refresh the analysis service after a key is changed in Settings."""
+    credentials = PROVIDER_SETTINGS.credentials()
+    VISION_ANALYSIS.settings = VisionSettings(
+        provider=credentials.provider,
+        api_key=credentials.api_key,
+        model=credentials.model or "gpt-4.1-mini",
+    )
+
+
+sync_vision_settings()
+
+
+class ProviderConfigurationRequest(BaseModel):
+    provider: str
+    api_key: str
 
 
 def model_status(model: Optional[torch.nn.Module], error: Optional[str], checkpoint: Path) -> Dict[str, Any]:
@@ -550,6 +577,7 @@ def health() -> Dict[str, Any]:
                 COLOR_CORRECTOR, COLOR_CORRECTOR_ERROR, COLOR_CORRECTOR_CHECKPOINT
             ),
         },
+        "vision_analysis": {**VISION_ANALYSIS.status(), **PROVIDER_SETTINGS.public_status()},
     }
 
 
@@ -678,3 +706,77 @@ async def compare(
         return JSONResponse({"pix2pix": pix_metrics, "sarfusionformer": sar_metrics})
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/api/analysis/image")
+async def analyze_image(
+    image: UploadFile = File(...),
+    analysis_type: str = Form(...),
+    metadata: Optional[str] = Form(None),
+) -> JSONResponse:
+    """Qualitatively review a rendered image without touching inference or metrics."""
+    try:
+        image_bytes = read_upload(image)
+        decoded = decode_rgb(image_bytes)
+        metadata_object: Dict[str, Any] = {}
+        if metadata:
+            parsed = json.loads(metadata)
+            if not isinstance(parsed, dict):
+                raise ValueError("Analysis metadata must be a JSON object.")
+            metadata_object = parsed
+        # Re-encode accepted images so the provider sees the safe RGB rendering
+        # displayed by the application, not an arbitrary uploaded container.
+        buffer = io.BytesIO()
+        decoded.save(buffer, format="PNG")
+        result = VISION_ANALYSIS.analyze_image(
+            buffer.getvalue(), "image/png", analysis_type, metadata_object
+        )
+        LOGGER.info(
+            "AI image analysis completed: type=%s provider=%s model=%s cached=%s",
+            analysis_type,
+            result["provider"],
+            result["model"],
+            result["cached"],
+        )
+        return JSONResponse(result)
+    except json.JSONDecodeError as error:
+        raise HTTPException(status_code=400, detail="Analysis metadata must be valid JSON.") from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except VisionAnalysisError as error:
+        status_code = 503 if not VISION_ANALYSIS.settings.configured else 502
+        raise HTTPException(status_code=status_code, detail=str(error)) from error
+
+
+@app.get("/api/settings/provider")
+def get_provider_settings() -> JSONResponse:
+    """Return non-sensitive provider status for the Settings UI."""
+    return JSONResponse(PROVIDER_SETTINGS.public_status())
+
+
+@app.post("/api/settings/provider")
+def save_provider_settings(configuration: ProviderConfigurationRequest) -> JSONResponse:
+    """Store a local key in macOS Keychain; never return its raw value."""
+    try:
+        status = PROVIDER_SETTINGS.save(configuration.provider, configuration.api_key)
+        sync_vision_settings()
+        return JSONResponse({"message": "Configuration saved successfully.", **status})
+    except ProviderSettingsError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.delete("/api/settings/provider")
+def delete_provider_settings() -> JSONResponse:
+    try:
+        status = PROVIDER_SETTINGS.delete()
+        sync_vision_settings()
+        return JSONResponse({"message": "Configuration deleted.", **status})
+    except ProviderSettingsError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/api/settings/test")
+def test_provider_settings() -> JSONResponse:
+    result = PROVIDER_SETTINGS.test_connection()
+    sync_vision_settings()
+    return JSONResponse(result)

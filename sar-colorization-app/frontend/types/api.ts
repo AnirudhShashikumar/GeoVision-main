@@ -24,3 +24,47 @@ export type SARFusionResult = {
   checkpoint: string; color_checkpoint: string | null; warning: string | null;
   diagnostics: Diagnostics; corrected_diagnostics: Diagnostics | null;
 };
+
+
+export type ImageAnalysisReport = {
+  executive_summary: string;
+  terrain: string[];
+  structural_and_human_features: string[];
+  vegetation_and_water: string[];
+  image_quality: string[];
+  possible_artifacts: string[];
+  notes: string[];
+  limitations: string[];
+  recommended_actions: string[];
+  confidence: "low" | "medium" | "high";
+  disclaimer: string;
+};
+
+export type ImageAnalysisResult = {
+  report: ImageAnalysisReport;
+  provider: string;
+  model: string;
+  cached: boolean;
+};
+
+
+export type ProviderId = "openai" | "gemini" | "anthropic";
+export type ProviderSettings = {
+  configured: boolean;
+  provider: string | null;
+  provider_id: ProviderId | null;
+  model: string | null;
+  masked_key: string | null;
+  source: "environment" | "keychain" | null;
+  connection_status: "connected" | "configured" | "invalid" | "not_configured";
+  supported: boolean;
+  managed_by_environment: boolean;
+  message?: string;
+};
+
+export type ProviderTestResult = {
+  success: boolean;
+  provider?: string;
+  model?: string;
+  message: string;
+};
