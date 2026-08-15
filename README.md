@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="icon-192.png" alt="GeoVision Logo" width="130"/>
+<img src="SAR2Optical-main copy/sar-colorization-app/frontend/publicicon-192.png" alt="GeoVision Logo" width="130"/>
 
 # GeoVision
 ### **See Beyond**
