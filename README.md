@@ -8,7 +8,6 @@ Transforming Synthetic Aperture Radar (SAR) imagery into realistic optical recon
 
 ---
 
-![Python](https://img.shields.io/badge/Python-3.10+-blue)
 ![PyTorch](https://img.shields.io/badge/PyTorch-Deep%20Learning-red)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Backend-green)
 ![Google Gemini](https://img.shields.io/badge/Google-Gemini%20AI-blue)
