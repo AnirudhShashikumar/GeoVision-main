@@ -1,4 +1,4 @@
-import type { Health, ImageAnalysisResult, Pix2PixResult, ProviderId, ProviderSettings, ProviderTestResult, SARFusionResult } from "@/types/api";
+import type { BenchmarkData, Health, ImageAnalysisResult, Pix2PixResult, ProviderId, ProviderSettings, ProviderTestResult, SARFusionResult } from "@/types/api";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8010").replace(/\/$/, "");
 
@@ -75,4 +75,11 @@ export function deleteProviderSettings() {
 
 export function testProviderSettings() {
   return settingsRequest<ProviderTestResult>("/api/settings/test", { method: "POST", body: "{}" });
+}
+
+
+export async function getBenchmark() {
+  const response = await fetch(`${API_URL}/api/benchmark`, { cache: "no-store" });
+  if (!response.ok) throw new Error("Benchmark data is unavailable.");
+  return response.json() as Promise<BenchmarkData>;
 }

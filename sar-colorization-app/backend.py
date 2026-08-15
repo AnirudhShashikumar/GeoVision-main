@@ -144,6 +144,10 @@ COLOR_CORRECTOR, COLOR_CORRECTOR_ERROR = try_load(
 )
 VISION_ANALYSIS = ImageAnalysisService()
 PROVIDER_SETTINGS = ProviderSettingsStore()
+LATEST_BENCHMARKS: Dict[str, Dict[str, Any]] = {
+    "pix2pix": {},
+    "sarfusionformer": {},
+}
 
 
 def sync_vision_settings() -> None:
@@ -554,12 +558,41 @@ def pix2pix_payload(
     source = decode_rgb(input_bytes)
     output, duration_ms = pix2pix_generate(source)
     target = decode_rgb(ground_truth_bytes) if ground_truth_bytes else None
-    return {
+    payload = {
         "input_preview": image_to_base64(source),
         "output": image_to_base64(output),
         "metrics": calculate_metrics(output, target) if target else None,
         "inference_time_ms": round(duration_ms, 2),
         "checkpoint": PIX2PIX_CHECKPOINT.name,
+    }
+    LATEST_BENCHMARKS["pix2pix"] = {
+        "metrics": payload["metrics"],
+        "inference_time_ms": payload["inference_time_ms"],
+        "sample": "current_sample",
+    }
+    return payload
+
+
+def checkpoint_size_mb(checkpoint: Path) -> Optional[float]:
+    if not checkpoint.is_file():
+        return None
+    return round(checkpoint.stat().st_size / (1024 * 1024), 2)
+
+
+def benchmark_model_payload(name: str, checkpoint: Path) -> Dict[str, Any]:
+    latest = LATEST_BENCHMARKS[name]
+    metrics = latest.get("metrics") or {}
+    return {
+        "metrics": {
+            "psnr": metrics.get("psnr"),
+            "ssim": metrics.get("ssim"),
+            "rgb_l1": metrics.get("rgb_l1"),
+            "inference_time_ms": latest.get("inference_time_ms"),
+            "model_size_mb": checkpoint_size_mb(checkpoint),
+            "gpu_memory_mb": latest.get("gpu_memory_mb"),
+        },
+        "sample": latest.get("sample"),
+        "checkpoint": checkpoint.name,
     }
 
 
@@ -578,6 +611,17 @@ def health() -> Dict[str, Any]:
             ),
         },
         "vision_analysis": {**VISION_ANALYSIS.status(), **PROVIDER_SETTINGS.public_status()},
+    }
+
+
+@app.get("/api/benchmark")
+def benchmark() -> Dict[str, Any]:
+    """Return real checkpoint metadata and the latest in-memory measured sample."""
+    return {
+        "models": {
+            "pix2pix": benchmark_model_payload("pix2pix", PIX2PIX_CHECKPOINT),
+            "sarfusionformer": benchmark_model_payload("sarfusionformer", SARFUSIONFORMER_CHECKPOINT),
+        }
     }
 
 
@@ -652,6 +696,17 @@ async def sarfusionformer_infer(
             vv, vh, apply_color_correction=apply_color_correction
         )
         target = decode_rgb(read_upload(ground_truth)) if ground_truth else None
+        raw_metrics = calculate_metrics(result["raw_rgb"], target) if target else None
+        corrected_metrics = (
+            calculate_metrics(result["corrected_raw_rgb"], target)
+            if target and result["corrected_raw_rgb"] is not None
+            else None
+        )
+        LATEST_BENCHMARKS["sarfusionformer"] = {
+            "metrics": raw_metrics,
+            "inference_time_ms": round(result["duration_ms"], 2),
+            "sample": "current_sample",
+        }
         return JSONResponse(
             {
                 "raw_output": image_to_base64(rgb_float_to_png(result["raw_rgb"])),
@@ -669,12 +724,8 @@ async def sarfusionformer_infer(
                 "vv_preview": image_to_base64(result["previews"]["vv"]),
                 "vh_preview": image_to_base64(result["previews"]["vh"]),
                 "sar_preview": image_to_base64(result["previews"]["sar"]),
-                "metrics_raw": calculate_metrics(result["raw_rgb"], target) if target else None,
-                "metrics_corrected": (
-                    calculate_metrics(result["corrected_raw_rgb"], target)
-                    if target and result["corrected_raw_rgb"] is not None
-                    else None
-                ),
+                "metrics_raw": raw_metrics,
+                "metrics_corrected": corrected_metrics,
                 "inference_time_ms": round(result["duration_ms"], 2),
                 "detected_shape": list(detected_shape),
                 "channel_layout": channel_layout,
@@ -703,6 +754,8 @@ async def compare(
         target = decode_rgb(read_upload(ground_truth))
         pix_metrics = calculate_metrics(decode_rgb(read_upload(pix2pix_output)), target)
         sar_metrics = calculate_metrics(decode_rgb(read_upload(sarfusionformer_output)), target)
+        LATEST_BENCHMARKS["pix2pix"] = {"metrics": pix_metrics, "sample": "current_comparison"}
+        LATEST_BENCHMARKS["sarfusionformer"] = {"metrics": sar_metrics, "sample": "current_comparison"}
         return JSONResponse({"pix2pix": pix_metrics, "sarfusionformer": sar_metrics})
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

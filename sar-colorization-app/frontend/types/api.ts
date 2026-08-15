@@ -68,3 +68,15 @@ export type ProviderTestResult = {
   model?: string;
   message: string;
 };
+
+
+export type BenchmarkMetrics = {
+  psnr: number | null;
+  ssim: number | null;
+  rgb_l1: number | null;
+  inference_time_ms: number | null;
+  model_size_mb: number | null;
+  gpu_memory_mb: number | null;
+};
+export type BenchmarkModel = { metrics: BenchmarkMetrics; sample: "current_sample" | "current_comparison" | null; checkpoint: string };
+export type BenchmarkData = { models: { pix2pix: BenchmarkModel; sarfusionformer: BenchmarkModel } };
