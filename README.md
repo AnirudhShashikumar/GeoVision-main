@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/logo.png" alt="GeoVision Logo" width="130"/>
+<img src="logo.png" alt="GeoVision Logo" width="130"/>
 
 # GeoVision
 ### **See Beyond**
