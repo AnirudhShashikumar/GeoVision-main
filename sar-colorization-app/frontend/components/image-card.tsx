@@ -1,17 +1,19 @@
 "use client";
 
-import { Download, Expand, Maximize2, Minus, Plus, RotateCcw, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { Download, Expand } from "lucide-react";
 import { ImageAnalysis } from "@/components/image-analysis";
+import { FullscreenImageViewer } from "@/components/viewer/fullscreen-image-viewer";
+import { ImageViewer } from "@/components/viewer/image-viewer";
 import { dataUrl } from "@/lib/utils";
 
-export function ImageCard({ title, image, action, analysis }: { title: string; image?: string | null; action?: { name: string; data: string }; analysis?: { type: string; metadata?: Record<string, unknown>; onReport?: (report: import("@/types/api").ImageAnalysisReport) => void } }) {
-  const src = dataUrl(image); const frame = useRef<HTMLDivElement>(null); const [open, setOpen] = useState(false); const [scale, setScale] = useState(1); const [offset, setOffset] = useState({ x: 0, y: 0 }); const [drag, setDrag] = useState<{ x: number; y: number; pointerId: number }>();
-  const reset = () => { setScale(1); setOffset({ x: 0, y: 0 }); };
-  const fullscreen = async () => { if (frame.current && !document.fullscreenElement) await frame.current.requestFullscreen(); else await document.exitFullscreen(); };
-  const viewer = (expanded = false) => <div ref={expanded ? frame : undefined} onDoubleClick={() => setScale(scale === 1 ? 2 : 1)} onWheel={e => { e.preventDefault(); setScale(v => Math.min(6, Math.max(1, v - e.deltaY * .001))); }} onPointerDown={e => { if (scale <= 1) return; e.currentTarget.setPointerCapture(e.pointerId); setDrag({ x: e.clientX, y: e.clientY, pointerId: e.pointerId }); }} onPointerMove={e => { if (!drag || drag.pointerId !== e.pointerId) return; setOffset(v => ({ x: v.x + e.clientX - drag.x, y: v.y + e.clientY - drag.y })); setDrag({ x: e.clientX, y: e.clientY, pointerId: e.pointerId }); }} onPointerUp={e => { if (drag?.pointerId === e.pointerId) { e.currentTarget.releasePointerCapture(e.pointerId); setDrag(undefined); } }} onPointerCancel={() => setDrag(undefined)} className={`relative flex min-h-0 items-center justify-center overflow-hidden bg-zinc-950/70 ${expanded ? "h-dvh w-dvw" : "aspect-square"}`}>
-    {src ? <img src={src} alt={title} draggable={false} className="max-h-full max-w-full select-none object-contain transition-transform duration-150" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})` }}/> : <span className="text-sm text-zinc-600">Awaiting inference</span>}
-    {expanded && src && <div className="absolute right-4 top-4 flex gap-1 rounded-xl border border-white/10 bg-zinc-950/80 p-1 backdrop-blur"><button onClick={() => setScale(v => Math.min(6, v + .25))} className="p-2"><Plus size={16}/></button><button onClick={() => setScale(v => Math.max(1, v - .25))} className="p-2"><Minus size={16}/></button><button onClick={reset} className="p-2"><RotateCcw size={16}/></button><button onClick={fullscreen} className="p-2"><Maximize2 size={16}/></button>{action && <a href={src} download={action.name} className="p-2"><Download size={16}/></a>}<button onClick={() => { document.exitFullscreen(); setOpen(false); }} className="p-2"><X size={16}/></button></div>}
-  </div>;
-  return <article className="panel overflow-hidden transition duration-200 hover:-translate-y-0.5 hover:border-sky-300/20"><header className="flex items-center justify-between px-4 py-3"><h3 className="text-sm font-medium">{title}</h3>{src && <div className="flex gap-1">{analysis && <ImageAnalysis image={src} title={title} analysisType={analysis.type} metadata={analysis.metadata} onReport={analysis.onReport}/>}<button onClick={() => { setOpen(true); reset(); }} aria-label="Open image viewer" className="rounded-md p-1.5 text-zinc-400 hover:bg-white/10 hover:text-white"><Expand size={15}/></button>{action && <a href={src} download={action.name} className="rounded-md p-1.5 text-zinc-400 hover:bg-white/10 hover:text-white" aria-label="Download image"><Download size={15}/></a>}</div>}</header>{viewer()}{open && <div className="fixed inset-0 z-50 bg-black/90">{viewer(true)}</div>}</article>;
+type Analysis = { type: string; metadata?: Record<string, unknown>; onReport?: (report: import("@/types/api").ImageAnalysisReport) => void };
+type Action = { name: string; data: string };
+
+export function ImageCard({ title, image, action, analysis }: { title: string; image?: string | null; action?: Action; analysis?: Analysis }) {
+  const src = useMemo(() => dataUrl(image), [image]);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const closeFullscreen = useCallback(() => { setFullscreen(false); requestAnimationFrame(() => triggerRef.current?.focus()); }, []);
+  return <article className="panel overflow-hidden transition duration-200 hover:-translate-y-0.5 hover:border-sky-300/20"><header className="flex items-center justify-between px-4 py-3"><h3 className="text-sm font-medium">{title}</h3>{src && <div className="flex gap-1">{analysis && <ImageAnalysis image={src} title={title} analysisType={analysis.type} metadata={analysis.metadata} onReport={analysis.onReport}/>}<button ref={triggerRef} onClick={() => setFullscreen(true)} aria-label={`Open ${title} fullscreen viewer`} className="rounded-md p-1.5 text-zinc-400 hover:bg-white/10 hover:text-white"><Expand size={15}/></button>{action && <a href={src} download={action.name} className="rounded-md p-1.5 text-zinc-400 hover:bg-white/10 hover:text-white" aria-label="Download image"><Download size={15}/></a>}</div>}</header><ImageViewer src={src} alt={title}/><FullscreenImageViewer open={fullscreen} src={src} title={title} downloadName={action?.name} onClose={closeFullscreen}/></article>;
 }
