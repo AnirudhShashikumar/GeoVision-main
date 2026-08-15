@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="frontend/public/icon-192.png" alt="GeoVision Logo" width="130"/>
+<img src="https://raw.githubusercontent.com/AnirudhShashikumar/SAR2Optical-main/main/frontend/public/icon-192.png" alt="GeoVision Logo" width="130"/>
 
 # GeoVision
 ### **See Beyond**
