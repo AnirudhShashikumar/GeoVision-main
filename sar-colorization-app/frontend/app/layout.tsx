@@ -3,8 +3,8 @@ import "./globals.css";
 import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
-  title: "SAR Optical Reconstruction",
-  description: "AI-powered SAR to optical reconstruction.",
+  title: "GeoVision | See Beyond",
+  description: "See Beyond with AI-powered SAR-to-optical intelligence.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
