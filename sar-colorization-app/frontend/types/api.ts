@@ -46,6 +46,7 @@ export type ImageAnalysisResult = {
   model: string;
   cached: boolean;
   debug?: Record<string, unknown>;
+  request_id?: string;
 };
 
 

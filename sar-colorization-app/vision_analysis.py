@@ -44,7 +44,6 @@ only valid JSON matching the requested schema."""
 
 SCHEMA: Dict[str, Any] = {
     "type": "object",
-    "additionalProperties": False,
     "properties": {
         "executive_summary": {"type": "string"},
         "terrain": {"type": "array", "items": {"type": "string"}},
@@ -124,23 +123,26 @@ class ImageAnalysisService:
         return safe if DEBUG_ENABLED else {}
 
     def _gemini_exception(self, error: Exception) -> VisionAnalysisError:
-        code = getattr(error, "code", None)
-        status = str(getattr(error, "status", "")).upper()
-        details = str(getattr(error, "details", "")).lower()
-        message = str(error).lower()
-        if code in {401, 403} or "api key" in details or "permission" in details:
-            return VisionAnalysisError("Invalid API key or the key cannot access the selected Gemini model.", "INVALID_API_KEY")
-        if code == 404 or "not found" in details or "model" in details and "supported" in details:
-            return VisionAnalysisError("Unsupported Gemini model. Select a currently available vision model.", "UNSUPPORTED_MODEL")
-        if code == 429 or "quota" in details:
-            return VisionAnalysisError("Gemini quota exceeded. Try again later or use another key.", "QUOTA_EXCEEDED", True)
-        if code in {408, 504} or "timeout" in details:
-            return VisionAnalysisError("Gemini request timed out. Your reconstruction result is unaffected.", "TIMEOUT", True)
-        if "connect" in message or "network" in message or "dns" in message:
-            return VisionAnalysisError("No internet connection to Google Gemini. Check the network and try again.", "NETWORK_FAILURE", True)
-        if isinstance(error, genai_errors.ServerError) or code and code >= 500:
-            return VisionAnalysisError("Google API is temporarily unavailable. Try again shortly.", "GOOGLE_UNAVAILABLE", True)
-        return VisionAnalysisError("Gemini request failed. Test the connection or review the selected model.", "GEMINI_REQUEST_FAILED")
+        """Turn SDK failures into safe, actionable UI error codes without secrets."""
+        http_code = getattr(error, "code", None)
+        details = (str(getattr(error, "details", "")) + " " + str(error)).lower()
+        if http_code == 401 or "api_key_invalid" in details or "api key not valid" in details:
+            return VisionAnalysisError("The saved Gemini API key is invalid or no longer authorized.", "INVALID_API_KEY")
+        if http_code == 403 or "permission denied" in details or "permission" in details:
+            return VisionAnalysisError("This API key does not have access to the selected Gemini model.", "MODEL_PERMISSION_DENIED")
+        if http_code == 404 or "not found" in details or ("model" in details and "supported" in details):
+            return VisionAnalysisError("The selected Gemini model is unavailable. Choose a supported model in Settings.", "UNSUPPORTED_MODEL")
+        if http_code == 429:
+            if "quota" in details or "resource_exhausted" in details:
+                return VisionAnalysisError("Your Gemini quota has been reached. Try again later or use another key.", "QUOTA_EXCEEDED", True)
+            return VisionAnalysisError("Gemini is temporarily rate-limited. Wait briefly and retry.", "RATE_LIMITED", True)
+        if http_code in {408, 504} or "timeout" in details or "timed out" in details:
+            return VisionAnalysisError("Gemini did not respond in time. Your reconstruction result is unaffected.", "TIMEOUT", True)
+        if "connect" in details or "network" in details or "dns" in details or "name resolution" in details:
+            return VisionAnalysisError("GeoVision could not reach Google Gemini. Check the network and retry.", "NETWORK_ERROR", True)
+        if isinstance(error, genai_errors.ServerError) or (isinstance(http_code, int) and http_code >= 500):
+            return VisionAnalysisError("Google Gemini is temporarily unavailable. Try again shortly.", "GOOGLE_API_UNAVAILABLE", True)
+        return VisionAnalysisError("Gemini returned an unexpected provider error. The reconstruction result is unaffected.", "UNKNOWN_PROVIDER_ERROR")
 
     def test_connection(self) -> Dict[str, Any]:
         if not self.settings.configured:
@@ -183,12 +185,12 @@ class ImageAnalysisService:
         if analysis_type not in ANALYSIS_TYPES:
             raise VisionAnalysisError("Unsupported analysis type: {}".format(analysis_type))
         if not self.settings.configured:
-            raise VisionAnalysisError("AI analysis requires an API key.", "NOT_CONFIGURED")
+            raise VisionAnalysisError("Connect Google Gemini before using AI Analysis.", "PROVIDER_NOT_CONFIGURED")
         if self.settings.provider not in {"openai", "gemini"}:
             raise VisionAnalysisError("Unsupported AI provider.", "UNSUPPORTED_PROVIDER")
 
         cache_key = hashlib.sha256(
-            image_bytes + analysis_type.encode("utf-8") + json.dumps(metadata or {}, sort_keys=True).encode("utf-8")
+            image_bytes + self.settings.model.encode("utf-8") + analysis_type.encode("utf-8") + json.dumps(metadata or {}, sort_keys=True).encode("utf-8")
         ).hexdigest()
         if cache_key in self._cache:
             return {**self._cache[cache_key], "cached": True}

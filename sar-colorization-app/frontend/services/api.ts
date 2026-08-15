@@ -2,12 +2,22 @@ import type { BenchmarkData, Health, ImageAnalysisResult, Pix2PixResult, Provide
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8010").replace(/\/$/, "");
 
+export class ApiRequestError extends Error {
+  constructor(message: string, public readonly code: string, public readonly status: number) { super(message); this.name = "ApiRequestError"; }
+}
+
+function requestError(body: unknown, status: number, fallback: string) {
+  const detail = typeof body === "object" && body ? (body as { detail?: unknown; message?: unknown }).detail ?? (body as { message?: unknown }).message : null;
+  if (typeof detail === "object" && detail) {
+    const error = detail as { code?: unknown; message?: unknown };
+    return new ApiRequestError(typeof error.message === "string" ? error.message : fallback, typeof error.code === "string" ? error.code : "UNKNOWN_PROVIDER_ERROR", status);
+  }
+  return new ApiRequestError(typeof detail === "string" ? detail : fallback, status >= 500 ? "BACKEND_UNAVAILABLE" : "UNKNOWN_PROVIDER_ERROR", status);
+}
+
 async function request<T>(path: string, form: FormData): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, { method: "POST", body: form });
-  if (!response.ok) {
-    const body = await response.json().catch(() => null);
-    throw new Error(body?.detail ?? "Inference request failed.");
-  }
+  if (!response.ok) throw requestError(await response.json().catch(() => null), response.status, "Inference request failed.");
   return response.json() as Promise<T>;
 }
 
@@ -41,23 +51,43 @@ export function runComparison(pix2pix: File, sarfusionformer: File, groundTruth:
 }
 
 
+export type AnalyzeImageRequest = {
+  image: Blob;
+  analysisType: string;
+  modelName: string;
+  checkpointName?: string;
+  displayMode?: string;
+  metrics?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export async function analyzeImage(input: AnalyzeImageRequest) {
+  const form = new FormData();
+  const mime = ["image/png", "image/jpeg", "image/webp"].includes(input.image.type) ? input.image.type : "image/png";
+  form.append("image", new File([input.image], "geovision-render." + mime.split("/")[1], { type: mime }));
+  form.append("analysis_type", input.analysisType);
+  form.append("model_name", input.modelName);
+  if (input.checkpointName) form.append("checkpoint_name", input.checkpointName);
+  if (input.displayMode) form.append("display_mode", input.displayMode);
+  if (input.metrics) form.append("metrics_json", JSON.stringify(input.metrics));
+  if (input.metadata) form.append("metadata_json", JSON.stringify(input.metadata));
+  return request<ImageAnalysisResult>("/api/analysis/image", form);
+}
+
+/** @deprecated Use analyzeImage with a stable image Blob. */
 export async function runImageAnalysis(imageSource: string, analysisType: string, metadata?: Record<string, unknown>) {
   const image = await fetch(imageSource).then(async response => {
-    if (!response.ok) throw new Error("The selected image is no longer available for analysis.");
+    if (!response.ok) throw new ApiRequestError("The selected image is no longer available for analysis.", "INVALID_IMAGE", response.status);
     return response.blob();
   });
-  const form = new FormData();
-  form.append("image", new File([image], "geovision-render.png", { type: image.type || "image/png" }));
-  form.append("analysis_type", analysisType);
-  if (metadata) form.append("metadata", JSON.stringify(metadata));
-  return request<ImageAnalysisResult>("/api/analysis/image", form);
+  return analyzeImage({ image, analysisType, modelName: typeof metadata?.model === "string" ? metadata.model : "", metadata });
 }
 
 
 async function settingsRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, { cache: "no-store", ...options, headers: { "Content-Type": "application/json", ...(options.headers ?? {}) } });
   const body = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(body?.detail ?? body?.message ?? "Provider settings request failed.");
+  if (!response.ok) throw requestError(body, response.status, "Provider settings request failed.");
   return body as T;
 }
 

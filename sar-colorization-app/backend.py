@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 
@@ -767,44 +768,63 @@ async def compare(
 async def analyze_image(
     image: UploadFile = File(...),
     analysis_type: str = Form(...),
+    model_name: str = Form(...),
+    checkpoint_name: Optional[str] = Form(None),
+    display_mode: Optional[str] = Form(None),
+    metrics_json: Optional[str] = Form(None),
+    metadata_json: Optional[str] = Form(None),
+    # Legacy field retained for existing clients during migration.
     metadata: Optional[str] = Form(None),
 ) -> JSONResponse:
-    """Qualitatively review a rendered image without touching inference or metrics."""
+    """Qualitatively review a rendered image without changing inference or metrics."""
+    request_id = uuid.uuid4().hex[:12]
     try:
+        uploaded_mime = (image.content_type or "").lower()
+        if uploaded_mime not in {"image/png", "image/jpeg", "image/webp"}:
+            raise VisionAnalysisError("The generated image could not be prepared for analysis.", "INVALID_IMAGE")
         image_bytes = read_upload(image)
-        LOGGER.info("AI analysis request: endpoint=/api/analysis/image analysis_type=%s image_bytes=%d uploaded_mime=%s", analysis_type, len(image_bytes), image.content_type or "unknown")
-        decoded = decode_rgb(image_bytes)
-        metadata_object: Dict[str, Any] = {}
-        if metadata:
-            parsed = json.loads(metadata)
+        if not image_bytes:
+            raise VisionAnalysisError("The generated image is empty.", "INVALID_IMAGE")
+        if len(image_bytes) > MAX_UPLOAD_BYTES:
+            raise VisionAnalysisError("The generated image exceeds the AI Analysis upload limit.", "IMAGE_TOO_LARGE")
+        if model_name.strip() != (VISION_ANALYSIS.settings.model or "").strip():
+            raise VisionAnalysisError("The selected Gemini model is unavailable. Choose a supported model in Settings.", "UNSUPPORTED_MODEL")
+        metadata_object: Dict[str, Any] = {
+            "model_name": model_name.strip(), "checkpoint_name": checkpoint_name,
+            "display_mode": display_mode,
+        }
+        for raw_value, label in ((metrics_json, "metrics_json"), (metadata_json or metadata, "metadata_json")):
+            if not raw_value:
+                continue
+            parsed = json.loads(raw_value)
             if not isinstance(parsed, dict):
-                raise ValueError("Analysis metadata must be a JSON object.")
-            metadata_object = parsed
-        # Re-encode accepted images so the provider sees the safe RGB rendering
-        # displayed by the application, not an arbitrary uploaded container.
+                raise ValueError("{} must be a JSON object.".format(label))
+            metadata_object[label] = parsed
+        LOGGER.info(
+            "AI analysis request: request_id=%s endpoint=/api/analysis/image type=%s model=%s bytes=%d mime=%s checkpoint=%s display_mode=%s",
+            request_id, analysis_type, model_name, len(image_bytes), uploaded_mime,
+            checkpoint_name or "none", display_mode or "none",
+        )
+        decoded = decode_rgb(image_bytes)
         buffer = io.BytesIO()
         decoded.save(buffer, format="PNG")
-        result = VISION_ANALYSIS.analyze_image(
-            buffer.getvalue(), "image/png", analysis_type, metadata_object
-        )
+        result = VISION_ANALYSIS.analyze_image(buffer.getvalue(), "image/png", analysis_type, metadata_object)
+        result["request_id"] = request_id
         LOGGER.info(
-            "AI image analysis completed: type=%s provider=%s model=%s cached=%s",
-            analysis_type,
-            result["provider"],
-            result["model"],
-            result["cached"],
+            "AI analysis completed: request_id=%s provider=%s model=%s cached=%s",
+            request_id, result["provider"], result["model"], result["cached"],
         )
         return JSONResponse(result)
     except json.JSONDecodeError as error:
-        LOGGER.exception("AI analysis metadata parsing failed")
-        raise HTTPException(status_code=400, detail="Analysis metadata must be valid JSON.") from error
+        LOGGER.exception("AI analysis metadata parsing failed: request_id=%s", request_id)
+        raise HTTPException(status_code=400, detail={"code": "INVALID_IMAGE", "message": "Analysis metadata must be valid JSON."}) from error
     except ValueError as error:
-        LOGGER.exception("AI analysis input validation failed")
-        raise HTTPException(status_code=400, detail=str(error)) from error
+        LOGGER.exception("AI analysis input validation failed: request_id=%s", request_id)
+        raise HTTPException(status_code=400, detail={"code": "INVALID_IMAGE", "message": str(error)}) from error
     except VisionAnalysisError as error:
-        LOGGER.exception("AI analysis provider failed: code=%s", error.code)
-        status_code = 503 if error.transient or error.code == "NOT_CONFIGURED" else 502
-        raise HTTPException(status_code=status_code, detail=str(error)) from error
+        LOGGER.exception("AI analysis provider failed: request_id=%s code=%s", request_id, error.code)
+        status_code = 503 if error.transient else 400
+        raise HTTPException(status_code=status_code, detail={"code": error.code, "message": str(error), "request_id": request_id}) from error
 
 
 @app.get("/api/settings/provider")
