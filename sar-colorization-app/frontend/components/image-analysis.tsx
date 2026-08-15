@@ -11,6 +11,7 @@ type Props = {
   analysisType: string;
   title: string;
   metadata?: Record<string, unknown>;
+  onReport?: (report: import("@/types/api").ImageAnalysisReport) => void;
 };
 
 const sections = [
@@ -24,11 +25,11 @@ const sections = [
   ["Recommended actions", "recommended_actions"],
 ] as const;
 
-export function ImageAnalysis({ image, analysisType, title, metadata }: Props) {
+export function ImageAnalysis({ image, analysisType, title, metadata, onReport }: Props) {
   const [open, setOpen] = useState(false);
   const [configurationOpen, setConfigurationOpen] = useState(false);
   const [configurationMessage, setConfigurationMessage] = useState("");
-  const analysis = useMutation({ mutationFn: () => runImageAnalysis(image, analysisType, metadata) });
+  const analysis = useMutation({ mutationFn: () => runImageAnalysis(image, analysisType, metadata), onSuccess: result => onReport?.(result.report) });
   const beginAnalysis = async () => {
     try {
       const provider = await getProviderSettings();
