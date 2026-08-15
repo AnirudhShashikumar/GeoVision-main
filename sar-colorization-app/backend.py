@@ -156,7 +156,7 @@ def sync_vision_settings() -> None:
     VISION_ANALYSIS.settings = VisionSettings(
         provider=credentials.provider,
         api_key=credentials.api_key,
-        model=credentials.model or "gpt-4.1-mini",
+        model=credentials.model or ("gemini-2.5-flash" if credentials.provider == "gemini" else "gpt-4.1-mini"),
     )
 
 
@@ -166,6 +166,8 @@ sync_vision_settings()
 class ProviderConfigurationRequest(BaseModel):
     provider: str
     api_key: str
+    model: Optional[str] = None
+    privacy_acknowledged: bool = False
 
 
 def model_status(model: Optional[torch.nn.Module], error: Optional[str], checkpoint: Path) -> Dict[str, Any]:
@@ -770,6 +772,7 @@ async def analyze_image(
     """Qualitatively review a rendered image without touching inference or metrics."""
     try:
         image_bytes = read_upload(image)
+        LOGGER.info("AI analysis request: endpoint=/api/analysis/image analysis_type=%s image_bytes=%d uploaded_mime=%s", analysis_type, len(image_bytes), image.content_type or "unknown")
         decoded = decode_rgb(image_bytes)
         metadata_object: Dict[str, Any] = {}
         if metadata:
@@ -793,43 +796,85 @@ async def analyze_image(
         )
         return JSONResponse(result)
     except json.JSONDecodeError as error:
+        LOGGER.exception("AI analysis metadata parsing failed")
         raise HTTPException(status_code=400, detail="Analysis metadata must be valid JSON.") from error
     except ValueError as error:
+        LOGGER.exception("AI analysis input validation failed")
         raise HTTPException(status_code=400, detail=str(error)) from error
     except VisionAnalysisError as error:
-        status_code = 503 if not VISION_ANALYSIS.settings.configured else 502
+        LOGGER.exception("AI analysis provider failed: code=%s", error.code)
+        status_code = 503 if error.transient or error.code == "NOT_CONFIGURED" else 502
         raise HTTPException(status_code=status_code, detail=str(error)) from error
 
 
 @app.get("/api/settings/provider")
+@app.get("/api/settings/ai-provider")
 def get_provider_settings() -> JSONResponse:
     """Return non-sensitive provider status for the Settings UI."""
     return JSONResponse(PROVIDER_SETTINGS.public_status())
 
 
-@app.post("/api/settings/provider")
-def save_provider_settings(configuration: ProviderConfigurationRequest) -> JSONResponse:
-    """Store a local key in macOS Keychain; never return its raw value."""
+@app.get("/api/settings/ai-provider/models")
+def get_provider_models(provider: str = "gemini") -> JSONResponse:
     try:
-        status = PROVIDER_SETTINGS.save(configuration.provider, configuration.api_key)
+        return JSONResponse(PROVIDER_SETTINGS.supported_models(provider))
+    except ProviderSettingsError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+def _test_saved_provider() -> Dict[str, Any]:
+    result = VISION_ANALYSIS.test_connection()
+    if result.get("success"):
+        PROVIDER_SETTINGS.record_connection("connected", result.get("latency_ms"))
+    elif result.get("status") == "invalid":
+        PROVIDER_SETTINGS.record_connection("invalid")
+    elif result.get("status") == "temporarily_unavailable":
+        PROVIDER_SETTINGS.record_connection("temporarily_unavailable")
+    sync_vision_settings()
+    return result
+
+
+@app.post("/api/settings/provider")
+@app.post("/api/settings/ai-provider")
+def save_provider_settings(configuration: ProviderConfigurationRequest) -> JSONResponse:
+    """Verify first, then persist only a masked, server-side Gemini configuration."""
+    try:
+        provider = configuration.provider.strip().lower()
+        LOGGER.info("Gemini configuration request: provider=%s model=%s key_length=%d endpoint=/api/settings/ai-provider", provider, (configuration.model or "").strip(), len(configuration.api_key.strip()))
+        if provider != "gemini":
+            raise ProviderSettingsError("Google Gemini is the currently supported provider in this configuration flow.")
+        if not configuration.api_key.strip() or "\n" in configuration.api_key or "\r" in configuration.api_key:
+            raise ProviderSettingsError("Enter a complete Gemini API key on one line.")
+        if not (configuration.model or "").strip():
+            raise ProviderSettingsError("Select a Gemini vision model.")
+        supported_model_ids = {item["id"] for item in PROVIDER_SETTINGS.supported_models("gemini")["models"]}
+        if configuration.model.strip() not in supported_model_ids:
+            raise ProviderSettingsError("Choose a Gemini model supported by this application.")
+        if provider == "gemini" and not configuration.privacy_acknowledged:
+            raise ProviderSettingsError("Confirm the privacy acknowledgement before connecting Gemini.")
+        candidate = ImageAnalysisService(VisionSettings(provider=provider, api_key=configuration.api_key.strip(), model=(configuration.model or "").strip()))
+        checked = candidate.test_connection()
+        if not checked.get("success"):
+            raise ProviderSettingsError(str(checked.get("message") or "Connection test failed."))
+        status = PROVIDER_SETTINGS.save(provider, configuration.api_key, configuration.model)
         sync_vision_settings()
-        return JSONResponse({"message": "Configuration saved successfully.", **status})
+        return JSONResponse({"success": True, "message": "Google Gemini connected successfully." if provider == "gemini" else "Configuration saved successfully.", **status, "latency_ms": checked.get("latency_ms")})
     except ProviderSettingsError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.delete("/api/settings/provider")
+@app.delete("/api/settings/ai-provider")
 def delete_provider_settings() -> JSONResponse:
     try:
         status = PROVIDER_SETTINGS.delete()
         sync_vision_settings()
-        return JSONResponse({"message": "Configuration deleted.", **status})
+        return JSONResponse({"success": True, "message": "Gemini configuration removed.", **status})
     except ProviderSettingsError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
 @app.post("/api/settings/test")
+@app.post("/api/settings/ai-provider/test")
 def test_provider_settings() -> JSONResponse:
-    result = PROVIDER_SETTINGS.test_connection()
-    sync_vision_settings()
-    return JSONResponse(result)
+    return JSONResponse(_test_saved_provider())

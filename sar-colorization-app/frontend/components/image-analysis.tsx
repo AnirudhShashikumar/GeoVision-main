@@ -33,8 +33,8 @@ export function ImageAnalysis({ image, analysisType, title, metadata, onReport }
   const beginAnalysis = async () => {
     try {
       const provider = await getProviderSettings();
-      if (!provider.configured || !provider.supported) {
-        setConfigurationMessage("AI analysis requires an API key.");
+      if (!provider.configured || !provider.supported || provider.connection_status !== "connected") {
+        setConfigurationMessage(provider.connection_status === "invalid" ? "Your Gemini connection needs attention. Replace or retest the key to continue." : "AI analysis requires an API key.");
         setConfigurationOpen(true);
         return;
       }
@@ -59,6 +59,7 @@ export function ImageAnalysis({ image, analysisType, title, metadata, onReport }
       {configurationMessage && <p className="mt-5 rounded-xl border border-emerald-300/20 bg-emerald-300/[.07] p-3 text-sm text-emerald-100">{configurationMessage}</p>}
       {analysis.isPending && <div className="flex items-center gap-2 py-12 text-sm text-zinc-300"><LoaderCircle className="animate-spin" size={18}/> Reviewing the rendered image…</div>}
       {analysis.error && <p className="mt-6 rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-100">{analysis.error.message}</p>}
+      {process.env.NEXT_PUBLIC_GEOVISION_DEBUG === "true" && analysis.data?.debug && <details className="mt-5 rounded-xl border border-white/[.08] bg-white/[.025] p-4 text-xs text-zinc-400"><summary className="cursor-pointer font-medium text-zinc-200">Developer diagnostics</summary><pre className="mt-3 overflow-auto whitespace-pre-wrap">{JSON.stringify(analysis.data.debug, null, 2)}</pre></details>}
       {report && <div className="mt-6 space-y-6 text-sm leading-6 text-zinc-300"><div className="rounded-xl border border-sky-400/15 bg-sky-400/[.06] p-4"><p className="text-xs font-semibold uppercase tracking-[.12em] text-sky-300">Executive summary · {report.confidence} confidence</p><p className="mt-2">{report.executive_summary}</p></div><div className="grid gap-5 sm:grid-cols-2">{sections.map(([label, key]) => <section key={key}><h3 className="font-medium text-zinc-100">{label}</h3><ul className="mt-2 space-y-1 text-zinc-400">{report[key].map((item, index) => <li key={index}>• {item}</li>)}</ul></section>)}</div><div className="rounded-xl border border-amber-300/20 bg-amber-300/[.06] p-4 text-amber-50/90"><span className="font-medium">Scientific caution: </span>{report.disclaimer}</div><p className="text-xs text-zinc-600">Generated analysis</p></div>}
     </div></div>}
     <AIProviderModal open={configurationOpen} onClose={() => setConfigurationOpen(false)} onSaved={continueAfterConfiguration} notice={configurationMessage}/>{configurationMessage && !configurationOpen && !open && <p className="sr-only" role="status">{configurationMessage}</p>}

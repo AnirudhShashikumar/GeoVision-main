@@ -18,9 +18,16 @@ from typing import Any, Dict, Optional
 import requests
 
 
+GEMINI_DEFAULT_MODEL = os.getenv("GEMINI_DEFAULT_MODEL", "gemini-3.5-flash").strip()
+GEMINI_SUPPORTED_MODELS = tuple(
+    model.strip() for model in os.getenv(
+        "GEMINI_SUPPORTED_MODELS", "gemini-3.5-flash,gemini-3.6-flash"
+    ).split(",") if model.strip()
+)
+
 PROVIDERS = {
     "openai": {"label": "OpenAI", "model": "gpt-4.1-mini", "supported": True},
-    "gemini": {"label": "Google Gemini", "model": None, "supported": False},
+    "gemini": {"label": "Google Gemini", "model": GEMINI_DEFAULT_MODEL, "supported": True},
     "anthropic": {"label": "Anthropic Claude", "model": None, "supported": False},
 }
 KEYCHAIN_SERVICE = "GeoVision.AIProvider"
@@ -68,15 +75,18 @@ class ProviderSettingsStore:
     def _environment_credentials(self) -> Optional[ProviderCredentials]:
         self._load_local_environment()
         provider = os.getenv("VISION_PROVIDER", "").strip().lower()
-        api_key = os.getenv("VISION_API_KEY") or os.getenv("OPENAI_API_KEY")
-        if not provider and api_key:
+        gemini_key = os.getenv("GEMINI_API_KEY")
+        api_key = os.getenv("VISION_API_KEY") or os.getenv("OPENAI_API_KEY") or gemini_key
+        if not provider and gemini_key:
+            provider = "gemini"
+        elif not provider and api_key:
             provider = "openai"
         if not provider or not api_key:
             return None
         return ProviderCredentials(
             provider=provider,
             api_key=api_key,
-            model=os.getenv("VISION_MODEL") or PROVIDERS.get(provider, {}).get("model"),
+            model=(os.getenv("VISION_MODEL") if provider != "gemini" else os.getenv("GEMINI_MODEL")) or PROVIDERS.get(provider, {}).get("model"),
             source="environment",
         )
 
@@ -135,17 +145,21 @@ class ProviderSettingsStore:
         )
 
     def credentials(self) -> ProviderCredentials:
+        # User-configured Keychain credentials take precedence over an optional
+        # deployment fallback key; neither raw value ever leaves the backend.
+        state = self._read_state()
+        keychain_key = self._read_keychain()
+        if keychain_key and state.get("provider"):
+            return ProviderCredentials(
+                provider=str(state.get("provider", "")).lower(),
+                api_key=keychain_key,
+                model=state.get("model"),
+                source="keychain",
+            )
         environment = self._environment_credentials()
         if environment:
             return environment
-        state = self._read_state()
-        keychain_key = self._read_keychain()
-        return ProviderCredentials(
-            provider=str(state.get("provider", "")).lower(),
-            api_key=keychain_key,
-            model=state.get("model"),
-            source="keychain" if keychain_key else None,
-        )
+        return ProviderCredentials(provider="", api_key=None, model=None, source=None)
 
     def public_status(self) -> Dict[str, Any]:
         credentials = self.credentials()
@@ -158,30 +172,53 @@ class ProviderSettingsStore:
             "provider_id": credentials.provider or None,
             "model": credentials.model if configured else None,
             "masked_key": mask_key(credentials.api_key) if credentials.api_key else None,
+            "masked_api_key": mask_key(credentials.api_key) if credentials.api_key else None,
             "source": credentials.source,
             "connection_status": state.get("connection_status", "not_configured" if not configured else "connected"),
+            "status": state.get("connection_status", "not_configured" if not configured else "connected"),
             "supported": bool(configured_provider.get("supported")),
             "managed_by_environment": credentials.source == "environment",
+            "last_tested_at": state.get("last_tested_at"),
+            "latency_ms": state.get("latency_ms"),
         }
 
-    def save(self, provider: str, api_key: str) -> Dict[str, Any]:
+    def supported_models(self, provider: str) -> Dict[str, Any]:
         provider = provider.strip().lower()
-        if provider not in PROVIDERS:
-            raise ProviderSettingsError("Choose a supported provider option.")
-        if not api_key.strip():
-            raise ProviderSettingsError("API key cannot be empty.")
-        if self._environment_credentials():
-            raise ProviderSettingsError("This deployment is configured through environment variables and cannot be changed here.")
-        self._write_keychain(api_key.strip())
-        self._write_state({
-            "provider": provider,
-            "model": PROVIDERS[provider]["model"],
-            "connection_status": "configured",
-        })
+        if provider != "gemini":
+            raise ProviderSettingsError("Only Google Gemini models are currently available in this configuration flow.")
+        models = [
+            {"id": model, "label": model.replace("-", " ").title(), "supports_images": True, "recommended": model == GEMINI_DEFAULT_MODEL}
+            for model in GEMINI_SUPPORTED_MODELS
+        ]
+        return {"provider": "gemini", "default_model": GEMINI_DEFAULT_MODEL, "models": models}
+
+    def save(self, provider: str, api_key: str, model: Optional[str] = None) -> Dict[str, Any]:
+        provider = provider.strip().lower()
+        clean_key = api_key.strip()
+        if provider not in PROVIDERS or not PROVIDERS[provider]["supported"]:
+            raise ProviderSettingsError("Choose a provider supported by this application.")
+        if not clean_key or "\n" in api_key or "\r" in api_key:
+            raise ProviderSettingsError("Enter a complete API key on one line.")
+        selected_model = (model or PROVIDERS[provider]["model"] or "").strip()
+        if provider == "gemini" and selected_model not in GEMINI_SUPPORTED_MODELS:
+            raise ProviderSettingsError("Choose a Gemini model supported by this application.")
+        self._write_keychain(clean_key)
+        self._write_state({"provider": provider, "model": selected_model, "connection_status": "connected"})
         return self.public_status()
 
+    def record_connection(self, status: str, latency_ms: Optional[int] = None) -> None:
+        credentials = self.credentials()
+        if credentials.source == "environment":
+            return
+        state = self._read_state()
+        state.update({"provider": credentials.provider, "model": credentials.model, "connection_status": status})
+        if latency_ms is not None:
+            state["last_tested_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+            state["latency_ms"] = latency_ms
+        self._write_state(state)
+
     def delete(self) -> Dict[str, Any]:
-        if self._environment_credentials():
+        if self.credentials().source == "environment":
             raise ProviderSettingsError("This deployment is configured through environment variables and cannot be deleted here.")
         self._delete_keychain()
         self._write_state({"connection_status": "not_configured"})

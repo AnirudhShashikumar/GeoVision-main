@@ -41,7 +41,8 @@ The interface connects to `http://127.0.0.1:8010` by default.
 - `SARFUSIONFORMER_CHECKPOINT`: path to `sarfusionformer_256_decoder_best.pt`.
 - `COLOR_CORRECTOR_CHECKPOINT`: path to `color_corrector_256_best.pt`.
 - `SAR_COLORIZATION_API_URL`: API URL used by Streamlit.
-- `VISION_PROVIDER`, `VISION_API_KEY`, `VISION_MODEL`: optional, server-side AI Image Analysis. In deployed environments, set these as server secrets. On local macOS installs, configure the key through Settings → AI Providers; it is saved to Keychain and never added to Git.
+- `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_DEFAULT_MODEL`, `GEMINI_SUPPORTED_MODELS`: optional server-side Gemini configuration. On local macOS installs, configure a Gemini key through Settings → AI Providers; it is stored in macOS Keychain and never added to Git. Do not set `NEXT_PUBLIC_GEMINI_API_KEY`.
+- `GEOVISION_SECRET_ENCRYPTION_KEY`: reserved for an encrypted server-side secret-store deployment; keep it server-only and out of Git.
 - `CORS_ORIGINS`: comma-separated trusted frontend origins; defaults to the local GeoVision frontend.
 
 ## API routes
@@ -52,8 +53,9 @@ The interface connects to `http://127.0.0.1:8010` by default.
 - `POST /api/sarfusionformer/infer`: independent VV/VH SARFusionFormer inference response.
 - `POST /api/compare`: metrics for two already-generated outputs and one common ground truth.
 - `POST /api/analysis/image`: optional qualitative analysis of a rendered image; it never changes inference or metrics.
-- `GET|POST|DELETE /api/settings/provider`: retrieve non-sensitive provider status, save a local secure configuration, or remove it.
-- `POST /api/settings/test`: lightweight server-side provider connection test.
+- `GET|POST|DELETE /api/settings/ai-provider`: retrieve non-sensitive Gemini status, validate and save a local secure configuration, or remove it. Legacy `/api/settings/provider` routes remain available.
+- `GET /api/settings/ai-provider/models?provider=gemini`: Gemini image-capable models enabled by this backend.
+- `POST /api/settings/ai-provider/test`: lightweight server-side Gemini connection test. Legacy `/api/settings/test` remains available.
 - `GET /health`: independent availability for all three loaded model components.
 
 ## Input requirements

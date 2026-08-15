@@ -45,6 +45,7 @@ export type ImageAnalysisResult = {
   provider: string;
   model: string;
   cached: boolean;
+  debug?: Record<string, unknown>;
 };
 
 
@@ -55,18 +56,29 @@ export type ProviderSettings = {
   provider_id: ProviderId | null;
   model: string | null;
   masked_key: string | null;
+  masked_api_key?: string | null;
   source: "environment" | "keychain" | null;
-  connection_status: "connected" | "configured" | "invalid" | "not_configured";
+  connection_status: "connected" | "configured" | "invalid" | "not_configured" | "temporarily_unavailable";
+  status?: string;
   supported: boolean;
   managed_by_environment: boolean;
+  last_tested_at?: string | null;
+  latency_ms?: number | null;
   message?: string;
 };
+
+export type ProviderModel = { id: string; label: string; supports_images: boolean; recommended: boolean };
+export type ProviderModels = { provider: "gemini"; default_model: string; models: ProviderModel[] };
 
 export type ProviderTestResult = {
   success: boolean;
   provider?: string;
   model?: string;
   message: string;
+  status?: string;
+  latency_ms?: number;
+  error_code?: string;
+  debug?: Record<string, unknown>;
 };
 
 

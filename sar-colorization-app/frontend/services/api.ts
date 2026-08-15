@@ -1,4 +1,4 @@
-import type { BenchmarkData, Health, ImageAnalysisResult, Pix2PixResult, ProviderId, ProviderSettings, ProviderTestResult, SARFusionResult } from "@/types/api";
+import type { BenchmarkData, Health, ImageAnalysisResult, Pix2PixResult, ProviderId, ProviderModels, ProviderSettings, ProviderTestResult, SARFusionResult } from "@/types/api";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8010").replace(/\/$/, "");
 
@@ -55,26 +55,30 @@ export async function runImageAnalysis(imageSource: string, analysisType: string
 
 
 async function settingsRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, { ...options, headers: { "Content-Type": "application/json", ...(options.headers ?? {}) } });
+  const response = await fetch(`${API_URL}${path}`, { cache: "no-store", ...options, headers: { "Content-Type": "application/json", ...(options.headers ?? {}) } });
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new Error(body?.detail ?? body?.message ?? "Provider settings request failed.");
   return body as T;
 }
 
 export function getProviderSettings() {
-  return settingsRequest<ProviderSettings>("/api/settings/provider", { method: "GET" });
+  return settingsRequest<ProviderSettings>("/api/settings/ai-provider", { method: "GET" });
 }
 
-export function saveProviderSettings(provider: ProviderId, apiKey: string) {
-  return settingsRequest<ProviderSettings>("/api/settings/provider", { method: "POST", body: JSON.stringify({ provider, api_key: apiKey }) });
+export function getProviderModels() {
+  return settingsRequest<ProviderModels>("/api/settings/ai-provider/models?provider=gemini", { method: "GET" });
+}
+
+export function saveProviderSettings(provider: ProviderId, apiKey: string, model: string, privacyAcknowledged: boolean) {
+  return settingsRequest<ProviderSettings>("/api/settings/ai-provider", { method: "POST", body: JSON.stringify({ provider, api_key: apiKey, model, privacy_acknowledged: privacyAcknowledged }) });
 }
 
 export function deleteProviderSettings() {
-  return settingsRequest<ProviderSettings>("/api/settings/provider", { method: "DELETE" });
+  return settingsRequest<ProviderSettings>("/api/settings/ai-provider", { method: "DELETE" });
 }
 
 export function testProviderSettings() {
-  return settingsRequest<ProviderTestResult>("/api/settings/test", { method: "POST", body: "{}" });
+  return settingsRequest<ProviderTestResult>("/api/settings/ai-provider/test", { method: "POST", body: "{}" });
 }
 
 
