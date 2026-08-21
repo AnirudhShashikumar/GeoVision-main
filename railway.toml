@@ -1,6 +1,6 @@
 [build]
 builder = "railpack"
-buildCommand = "which python && python --version && uv --version && uv pip install --python python -r sar-colorization-app/requirements-backend.txt && python -c \"import huggingface_hub; print(huggingface_hub.__version__)\" && python scripts/download_checkpoints.py"
+buildCommand = "which python && python --version && uv --version && uv pip install --python python -r sar-colorization-app/requirements-railway.txt && python -c \"import huggingface_hub; print(huggingface_hub.__version__)\" && python scripts/download_checkpoints.py"
 
 [deploy]
 startCommand = "uvicorn backend:app --app-dir sar-colorization-app --host 0.0.0.0 --port $PORT"
