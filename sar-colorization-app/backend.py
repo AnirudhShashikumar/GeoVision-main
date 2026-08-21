@@ -23,8 +23,14 @@ from pydantic import BaseModel
 from PIL import Image, UnidentifiedImageError
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT_DIR))
+APP_DIR = Path(__file__).resolve().parent
+ROOT_DIR = APP_DIR.parent
+
+# Keep imports stable when the API is run from the repository root (Render),
+# from this directory (local Uvicorn), or through an import-based test runner.
+for import_path in (ROOT_DIR, APP_DIR):
+    if str(import_path) not in sys.path:
+        sys.path.insert(0, str(import_path))
 
 from sarfusionformer import SARFusionFormer, lab_to_rgb
 from src.pix2pix import Pix2Pix
@@ -36,25 +42,32 @@ LOGGER = logging.getLogger("sar-colorization")
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-PIX2PIX_CHECKPOINT = Path(
-    os.environ.get("PIX2PIX_CHECKPOINT", ROOT_DIR / "pix2pix_gen_180.pth")
+
+
+def checkpoint_path(environment_key: str, default_relative_path: str) -> Path:
+    """Resolve checkpoint locations consistently for local and hosted deployments.
+
+    An environment value may be absolute (for a mounted disk) or relative to the
+    repository root (for local use and the Render build download step). Defaults
+    remain the original checkpoint locations used by this project.
+    """
+    configured = os.getenv(environment_key, default_relative_path).strip()
+    candidate = Path(configured).expanduser()
+    return candidate.resolve() if candidate.is_absolute() else (ROOT_DIR / candidate).resolve()
+
+
+PIX2PIX_CHECKPOINT = checkpoint_path("PIX2PIX_CHECKPOINT", "pix2pix_gen_180.pth")
+SARFUSIONFORMER_CHECKPOINT = checkpoint_path(
+    "SARFUSIONFORMER_CHECKPOINT", "models/checkpoints/sarfusionformer_256_decoder_best.pt"
 )
-SARFUSIONFORMER_CHECKPOINT = Path(
-    os.environ.get(
-        "SARFUSIONFORMER_CHECKPOINT",
-        ROOT_DIR / "models" / "checkpoints" / "sarfusionformer_256_decoder_best.pt",
-    )
-)
-COLOR_CORRECTOR_CHECKPOINT = Path(
-    os.environ.get(
-        "COLOR_CORRECTOR_CHECKPOINT",
-        ROOT_DIR / "models" / "checkpoints" / "color_corrector_256_best.pt",
-    )
+COLOR_CORRECTOR_CHECKPOINT = checkpoint_path(
+    "COLOR_CORRECTOR_CHECKPOINT", "models/checkpoints/color_corrector_256_best.pt"
 )
 
 app = FastAPI(title="SAR-to-Optical Colorization API", version="2.0.0")
 CORS_ORIGINS = [origin.strip() for origin in os.getenv(
-    "CORS_ORIGINS", "http://127.0.0.1:8520,http://localhost:8520"
+    "CORS_ORIGINS",
+    "http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:8520,http://localhost:8520",
 ).split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,

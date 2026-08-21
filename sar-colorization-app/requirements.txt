@@ -4,6 +4,7 @@ pillow>=10.0
 python-multipart>=0.0.9
 requests>=2.31
 google-genai>=1.0
+huggingface_hub>=0.30
 scikit-image>=0.22
 streamlit>=1.39
 torch>=2.8
