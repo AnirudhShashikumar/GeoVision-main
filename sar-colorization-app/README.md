@@ -45,6 +45,24 @@ The interface connects to `http://127.0.0.1:8010` by default.
 - `GEOVISION_SECRET_ENCRYPTION_KEY`: reserved for an encrypted server-side secret-store deployment; keep it server-only and out of Git.
 - `CORS_ORIGINS`: comma-separated trusted frontend origins; defaults to the local GeoVision frontend.
 
+## Vercel frontend deployment
+
+The Next.js dashboard is ready to deploy as a Vercel project. This repository also
+contains a PyTorch inference API and model checkpoints; keep that API on a separate
+long-running compute service rather than deploying it as a Vercel Function.
+
+When importing this repository into Vercel, configure the project as follows:
+
+- **Root Directory:** `sar-colorization-app/frontend`
+- **Framework Preset:** Next.js (the detected default)
+- **Build Command / Output Directory:** leave at the detected Next.js defaults
+- **Environment Variable:** set `NEXT_PUBLIC_API_URL` to the public HTTPS URL of the
+  deployed inference API, with no trailing slash
+
+On the API host, set `CORS_ORIGINS` to the Vercel production domain (and any preview
+domains that should call the API), and configure the three checkpoint paths. Keep
+Gemini and encryption secrets server-side; never add them as `NEXT_PUBLIC_*` values.
+
 ## API routes
 
 - `POST /predict`: legacy Pix2Pix PNG response.
